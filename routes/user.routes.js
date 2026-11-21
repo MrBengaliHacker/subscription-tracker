@@ -1,21 +1,9 @@
 import { Router } from "express";
+import authorize from "../middlewares/auth.middleware.js";
+import { getCurrentUser } from "../controllers/user.controller.js";
 
 const userRouter = Router();
 
-userRouter.get("/", (req, res) =>
-  res.send({ title: "Fetch all users" })
-);
-
-userRouter.get("/:id", (req, res) =>
-  res.send({ title: "Fetch user details" })
-);
-
-userRouter.patch("/:id", (req, res) =>
-  res.send({ title: "Update user" })
-);
-
-userRouter.delete("/:id", (req, res) =>
-  res.send({ title: "Delete user" })
-);
+userRouter.get("/me", authorize, getCurrentUser);
 
 export default userRouter;
