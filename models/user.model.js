@@ -1,7 +1,7 @@
 
 import { pool } from "../database/postgresql.js";
 
-const createUser = async ({ name, email, password }) => {
+const createUser = async ({ name, email, password }, client = pool) => {
   const query = `
     INSERT INTO users (name, email, password)
     VALUES ($1, $2, $3)
@@ -10,7 +10,7 @@ const createUser = async ({ name, email, password }) => {
 
   const values = [name, email, password];
 
-  const { rows } = await pool.query(query, values);
+  const { rows } = await client.query(query, values);
 
   return rows[0];
 };
