@@ -40,6 +40,7 @@ const revokeRefreshToken = async (tokenHash, client = pool) => {
     SET revoked_at = NOW()
     WHERE token_hash = $1
       AND revoked_at IS NULL
+      AND expires_at > NOW()
     RETURNING id, user_id, revoked_at
   `;
 

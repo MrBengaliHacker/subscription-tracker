@@ -8,9 +8,18 @@ import {
   comparePassword,
 } from "../utils/password.js";
 
-import { createSession } from "../services/auth-session.service.js";
+import {
+  createSession,
+  rotateSession,
+} from "../services/auth-session.service.js";
+
 import { withTransaction } from "../database/transaction.js";
-import { setRefreshTokenCookie } from "../utils/auth-cookie.js";
+
+import {
+  REFRESH_TOKEN_COOKIE,
+  setRefreshTokenCookie,
+  clearRefreshTokenCookie,
+} from "../utils/auth-cookie.js";
 
 const signUp = async (req, res, next) => {
   try {
@@ -120,4 +129,36 @@ const signIn = async (req, res, next) => {
   }
 };
 
-export { signUp, signIn };
+
+const refresh = async (req, res, next) => {
+  try {
+    const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        message: "Refresh token is required",
+      });
+    }
+
+    const session = await rotateSession(refreshToken);
+
+    if (!session) {
+      clearRefreshTokenCookie(res);
+
+      return res.status(401).json({
+        message: "Invalid or expired refresh token",
+      });
+    }
+
+    setRefreshTokenCookie(res, session.refreshToken);
+
+    return res.status(200).json({
+      message: "Token refreshed successfully",
+      accessToken: session.accessToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export { signUp, signIn, refresh };
