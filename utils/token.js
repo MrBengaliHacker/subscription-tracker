@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-
+import { randomUUID } from "node:crypto";
 import {
   JWT_ACCESS_SECRET,
   JWT_ACCESS_EXPIRES_IN,
@@ -19,7 +19,10 @@ const generateRefreshToken = (userId) => {
   return jwt.sign(
     { userId },
     JWT_REFRESH_SECRET,
-    { expiresIn: JWT_REFRESH_EXPIRES_IN }
+    {
+      expiresIn: JWT_REFRESH_EXPIRES_IN,
+      jwtid: randomUUID(),
+    }
   );
 };
 
