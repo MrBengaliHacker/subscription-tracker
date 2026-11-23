@@ -22,8 +22,8 @@ const calculateRenewalDate = (startDate, frequency) => {
         Date.UTC(
           renewalDate.getUTCFullYear(),
           renewalDate.getUTCMonth() + 1,
-          0
-        )
+          0,
+        ),
       ).getUTCDate();
 
       renewalDate.setUTCDate(Math.min(day, lastDay));
@@ -39,11 +39,7 @@ const calculateRenewalDate = (startDate, frequency) => {
       renewalDate.setUTCMonth(month);
 
       const lastDay = new Date(
-        Date.UTC(
-          renewalDate.getUTCFullYear(),
-          month + 1,
-          0
-        )
+        Date.UTC(renewalDate.getUTCFullYear(), month + 1, 0),
       ).getUTCDate();
 
       renewalDate.setUTCDate(Math.min(day, lastDay));
@@ -131,8 +127,100 @@ const findSubscriptionsByUserId = async (userId) => {
   return rows;
 };
 
+const deleteSubscription = async (id, userId) => {
+  const query = `
+    DELETE FROM subscriptions
+    WHERE id = $1 AND user_id = $2
+    RETURNING *
+  `;
+
+  const { rows } = await pool.query(query, [id, userId]);
+
+  return rows[0] || null;
+};
+
+const updateSubscription = async (id, userId, updates) => {
+  const allowedFields = [
+    "name",
+    "price",
+    "currency",
+    "frequency",
+    "category",
+    "payment_method",
+    "start_date",
+  ];
+
+  const fields = Object.keys(updates).filter((field) =>
+    allowedFields.includes(field),
+  );
+
+  if (fields.length === 0) {
+    return null;
+  }
+
+  const existingSubscription = await findSubscriptionById(id);
+
+  if (!existingSubscription || existingSubscription.user_id !== userId) {
+    return null;
+  }
+
+  const updatedData = {
+    ...existingSubscription,
+    ...updates,
+  };
+
+  const shouldRecalculate =
+    fields.includes("frequency") || fields.includes("start_date");
+
+  if (shouldRecalculate) {
+    updatedData.renewal_date = calculateRenewalDate(
+      updatedData.start_date,
+      updatedData.frequency,
+    );
+  }
+
+  const values = fields.map((field) => updatedData[field]);
+
+  const setClause = fields
+    .map((field, index) => `${field} = $${index + 1}`)
+    .join(", ");
+
+  let query;
+
+  if (shouldRecalculate) {
+    values.push(updatedData.renewal_date);
+
+    query = `
+      UPDATE subscriptions
+      SET ${setClause},
+          renewal_date = $${values.length},
+          updated_at = NOW()
+      WHERE id = $${values.length + 1}
+        AND user_id = $${values.length + 2}
+      RETURNING *
+    `;
+  } else {
+    query = `
+      UPDATE subscriptions
+      SET ${setClause},
+          updated_at = NOW()
+      WHERE id = $${values.length + 1}
+        AND user_id = $${values.length + 2}
+      RETURNING *
+    `;
+  }
+
+  values.push(id, userId);
+
+  const { rows } = await pool.query(query, values);
+
+  return rows[0] || null;
+};
+
 export {
   createSubscription,
   findSubscriptionById,
   findSubscriptionsByUserId,
+  deleteSubscription,
+  updateSubscription,
 };
