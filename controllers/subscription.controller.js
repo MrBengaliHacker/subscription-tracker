@@ -104,6 +104,18 @@ export const updateSubscription = async (req, res, next) => {
       startDate: "start_date",
     };
 
+    // 1. Validate request body
+    if (
+      !req.body ||
+      typeof req.body !== "object" ||
+      Array.isArray(req.body)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Request body must be a JSON object",
+      });
+    }
+
     const requestFields = Object.keys(req.body);
 
     if (requestFields.length === 0) {
@@ -113,8 +125,9 @@ export const updateSubscription = async (req, res, next) => {
       });
     }
 
+    // 2. Reject unsupported fields
     const invalidFields = requestFields.filter(
-      (field) => !Object.hasOwn(allowedFields, field)
+      (field) => !Object.hasOwn(allowedFields, field),
     );
 
     if (invalidFields.length > 0) {
@@ -124,13 +137,22 @@ export const updateSubscription = async (req, res, next) => {
       });
     }
 
+    // 3. Map API fields to database fields
     const updates = {};
 
     for (const [key, value] of Object.entries(req.body)) {
       updates[allowedFields[key]] = value;
     }
 
+    // 4. Validate name
     if (updates.name !== undefined) {
+      if (typeof updates.name !== "string") {
+        return res.status(400).json({
+          success: false,
+          message: "Subscription name must be a string",
+        });
+      }
+
       updates.name = updates.name.trim();
 
       if (!updates.name) {
@@ -141,7 +163,20 @@ export const updateSubscription = async (req, res, next) => {
       }
     }
 
+    // 5. Validate price
     if (updates.price !== undefined) {
+      if (
+        (typeof updates.price !== "number" &&
+          typeof updates.price !== "string") ||
+        (typeof updates.price === "string" &&
+          updates.price.trim() === "")
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Price must be a valid positive number",
+        });
+      }
+
       updates.price = Number(updates.price);
 
       if (!Number.isFinite(updates.price) || updates.price <= 0) {
@@ -152,10 +187,19 @@ export const updateSubscription = async (req, res, next) => {
       }
     }
 
+    // 6. Validate frequency
     if (updates.frequency !== undefined) {
-      const validFrequencies = ["daily", "weekly", "monthly", "yearly"];
+      const validFrequencies = [
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+      ];
 
-      if (!validFrequencies.includes(updates.frequency)) {
+      if (
+        typeof updates.frequency !== "string" ||
+        !validFrequencies.includes(updates.frequency)
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid subscription frequency",
@@ -163,10 +207,53 @@ export const updateSubscription = async (req, res, next) => {
       }
     }
 
-    if (updates.start_date !== undefined) {
-      const date = new Date(updates.start_date);
+    // 7. Validate other string fields
+    const stringFields = [
+      "currency",
+      "category",
+      "payment_method",
+    ];
 
-      if (Number.isNaN(date.getTime())) {
+    for (const field of stringFields) {
+      if (updates[field] !== undefined) {
+        if (
+          typeof updates[field] !== "string" ||
+          !updates[field].trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: `${field} must be a non-empty string`,
+          });
+        }
+
+        updates[field] = updates[field].trim();
+      }
+    }
+
+    // 8. Validate start date (YYYY-MM-DD)
+    if (updates.start_date !== undefined) {
+      if (
+        typeof updates.start_date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(updates.start_date)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Start date must use YYYY-MM-DD format",
+        });
+      }
+
+      const [year, month, day] = updates.start_date
+        .split("-")
+        .map(Number);
+
+      const date = new Date(Date.UTC(year, month - 1, day));
+
+      const isValidDate =
+        date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day;
+
+      if (!isValidDate) {
         return res.status(400).json({
           success: false,
           message: "Invalid start date",
@@ -176,10 +263,11 @@ export const updateSubscription = async (req, res, next) => {
       updates.start_date = date;
     }
 
+    // 9. Update subscription
     const subscription = await updateSubscriptionModel(
       req.params.id,
       req.user.id,
-      updates
+      updates,
     );
 
     if (!subscription) {
@@ -189,7 +277,7 @@ export const updateSubscription = async (req, res, next) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Subscription updated successfully",
       data: subscription,

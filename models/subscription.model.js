@@ -1,4 +1,5 @@
 import { pool } from "../database/postgresql.js";
+import { withTransaction } from "../database/transaction.js";
 
 const calculateRenewalDate = (startDate, frequency) => {
   const renewalDate = new Date(startDate);
@@ -158,63 +159,75 @@ const updateSubscription = async (id, userId, updates) => {
     return null;
   }
 
-  const existingSubscription = await findSubscriptionById(id);
+  return withTransaction(async (client) => {
+    // 1. Find and lock the subscription row
+    const selectQuery = `
+      SELECT *
+      FROM subscriptions
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+    `;
 
-  if (!existingSubscription || existingSubscription.user_id !== userId) {
-    return null;
-  }
+    const { rows } = await client.query(selectQuery, [id, userId]);
 
-  const updatedData = {
-    ...existingSubscription,
-    ...updates,
-  };
+    const existingSubscription = rows[0];
 
-  const shouldRecalculate =
-    fields.includes("frequency") || fields.includes("start_date");
+    if (!existingSubscription) {
+      return null;
+    }
 
-  if (shouldRecalculate) {
-    updatedData.renewal_date = calculateRenewalDate(
-      updatedData.start_date,
-      updatedData.frequency,
+    // 2. Merge existing data with requested updates
+    const updatedData = {
+      ...existingSubscription,
+      ...updates,
+    };
+
+    // 3. Recalculate renewal date when necessary
+    const shouldRecalculate =
+      fields.includes("frequency") || fields.includes("start_date");
+
+    if (shouldRecalculate) {
+      updatedData.renewal_date = calculateRenewalDate(
+        updatedData.start_date,
+        updatedData.frequency,
+      );
+    }
+
+    // 4. Build dynamic UPDATE query
+    const values = fields.map((field) => updatedData[field]);
+
+    const setClause = fields
+      .map((field, index) => `${field} = $${index + 1}`)
+      .join(", ");
+
+    if (shouldRecalculate) {
+      values.push(updatedData.renewal_date);
+    }
+
+    values.push(id, userId);
+
+    const renewalClause = shouldRecalculate
+      ? `renewal_date = $${values.length - 2},`
+      : "";
+
+    const updateQuery = `
+      UPDATE subscriptions
+      SET ${setClause},
+          ${renewalClause}
+          updated_at = NOW()
+      WHERE id = $${values.length - 1}
+        AND user_id = $${values.length}
+      RETURNING *
+    `;
+
+    // 5. Execute update using the same transaction client
+    const { rows: updatedRows } = await client.query(
+      updateQuery,
+      values,
     );
-  }
 
-  const values = fields.map((field) => updatedData[field]);
-
-  const setClause = fields
-    .map((field, index) => `${field} = $${index + 1}`)
-    .join(", ");
-
-  let query;
-
-  if (shouldRecalculate) {
-    values.push(updatedData.renewal_date);
-
-    query = `
-      UPDATE subscriptions
-      SET ${setClause},
-          renewal_date = $${values.length},
-          updated_at = NOW()
-      WHERE id = $${values.length + 1}
-        AND user_id = $${values.length + 2}
-      RETURNING *
-    `;
-  } else {
-    query = `
-      UPDATE subscriptions
-      SET ${setClause},
-          updated_at = NOW()
-      WHERE id = $${values.length + 1}
-        AND user_id = $${values.length + 2}
-      RETURNING *
-    `;
-  }
-
-  values.push(id, userId);
-
-  const { rows } = await pool.query(query, values);
-
-  return rows[0] || null;
+    return updatedRows[0] || null;
+  });
 };
 
 export {
