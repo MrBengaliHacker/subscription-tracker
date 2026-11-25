@@ -230,10 +230,56 @@ const updateSubscription = async (id, userId, updates) => {
   });
 };
 
+const cancelSubscription = async (id, userId) => {
+  return withTransaction(async (client) => {
+    const selectQuery = `
+      SELECT *
+      FROM subscriptions
+      WHERE id = $1 AND user_id = $2
+      FOR UPDATE
+    `;
+
+    const { rows } = await client.query(selectQuery, [id, userId]);
+
+    const subscription = rows[0];
+
+    if (!subscription) {
+      return { status: "not_found" };
+    }
+
+    if (subscription.status === "cancelled") {
+      return { status: "already_cancelled", subscription };
+    }
+
+    if (subscription.status === "expired") {
+      return { status: "already_expired", subscription };
+    }
+
+    const updateQuery = `
+      UPDATE subscriptions
+      SET status = 'cancelled',
+          updated_at = NOW()
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+    `;
+
+    const { rows: updatedRows } = await client.query(updateQuery, [
+      id,
+      userId,
+    ]);
+
+    return {
+      status: "cancelled",
+      subscription: updatedRows[0],
+    };
+  });
+};
+
 export {
   createSubscription,
   findSubscriptionById,
   findSubscriptionsByUserId,
   deleteSubscription,
   updateSubscription,
+  cancelSubscription,
 };
