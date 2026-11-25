@@ -11,7 +11,17 @@ const authorize = async (req, res, next) => {
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const [scheme, token, ...extra] = authHeader.split(" ");
+
+    if (
+      scheme !== "Bearer" ||
+      !token ||
+      extra.length > 0
+    ) {
+      return res.status(401).json({
+        message: "Unauthorized: Missing or invalid token",
+      });
+    }
 
     // Verify access token
     const decoded = verifyAccessToken(token);
@@ -33,7 +43,8 @@ const authorize = async (req, res, next) => {
     if (
       error.name === "TokenExpiredError" ||
       error.name === "JsonWebTokenError" ||
-      error.name === "NotBeforeError"
+      error.name === "NotBeforeError" ||
+      error.message === "Invalid access token type"
     ) {
       return res.status(401).json({
         message: "Unauthorized: Invalid or expired token",

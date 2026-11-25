@@ -11,6 +11,7 @@ import {
 import {
   createSession,
   rotateSession,
+  logoutSession,
 } from "../services/auth-session.service.js";
 
 import { withTransaction } from "../database/transaction.js";
@@ -161,4 +162,22 @@ const refresh = async (req, res, next) => {
   }
 };
 
-export { signUp, signIn, refresh };
+const signOut = async (req, res, next) => {
+  try {
+    const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
+
+    if (refreshToken) {
+      await logoutSession(refreshToken, req.user.id);
+    }
+
+    clearRefreshTokenCookie(res);
+
+    return res.status(200).json({
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export { signUp, signIn, refresh, signOut };

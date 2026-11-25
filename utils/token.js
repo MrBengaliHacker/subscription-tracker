@@ -9,7 +9,7 @@ import {
 
 const generateAccessToken = (userId) => {
   return jwt.sign(
-    { userId },
+    { userId, type: "access" },
     JWT_ACCESS_SECRET,
     { expiresIn: JWT_ACCESS_EXPIRES_IN }
   );
@@ -17,7 +17,7 @@ const generateAccessToken = (userId) => {
 
 const generateRefreshToken = (userId) => {
   return jwt.sign(
-    { userId },
+    { userId, type: "refresh" },
     JWT_REFRESH_SECRET,
     {
       expiresIn: JWT_REFRESH_EXPIRES_IN,
@@ -27,11 +27,23 @@ const generateRefreshToken = (userId) => {
 };
 
 const verifyAccessToken = (token) => {
-  return jwt.verify(token, JWT_ACCESS_SECRET);
+  const decoded = jwt.verify(token, JWT_ACCESS_SECRET);
+
+  if (decoded.type !== "access") {
+    throw new Error("Invalid access token type");
+  }
+
+  return decoded;
 };
 
 const verifyRefreshToken = (token) => {
-  return jwt.verify(token, JWT_REFRESH_SECRET);
+  const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+
+  if (decoded.type !== "refresh") {
+    throw new Error("Invalid refresh token type");
+  }
+
+  return decoded;
 };
 
 export {

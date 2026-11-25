@@ -1,4 +1,4 @@
-
+import { randomUUID } from "node:crypto";
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -9,14 +9,19 @@ import { hashToken } from "../utils/token-hash.js";
 
 import {
   createRefreshToken,
-  findRefreshTokenByHash,
+  findRefreshTokenByHashForUpdate,
   revokeRefreshToken,
+  revokeRefreshTokenFamily,
 } from "../models/refresh-token.model.js";
 
 import { findUserById } from "../models/user.model.js";
 import { withTransaction } from "../database/transaction.js";
 
-const createSession = async (user, client = null) => {
+const createSession = async (
+  user,
+  client = null,
+  familyId = randomUUID()
+) => {
   const accessToken = generateAccessToken(user.id);
   const refreshToken = generateRefreshToken(user.id);
 
@@ -29,7 +34,7 @@ const createSession = async (user, client = null) => {
 
   const saveRefreshToken = async (dbClient) => {
     await createRefreshToken(
-      { userId: user.id, tokenHash, expiresAt },
+      { userId: user.id, tokenHash, expiresAt, familyId },
       dbClient
     );
   };
@@ -54,34 +59,66 @@ const rotateSession = async (refreshToken) => {
 
   const tokenHash = hashToken(refreshToken);
 
-  const storedToken = await findRefreshTokenByHash(tokenHash);
+  return withTransaction(async (client) => {
+    const storedToken = await findRefreshTokenByHashForUpdate(
+      tokenHash,
+      client
+    );
 
-  if (
-    !storedToken ||
-    storedToken.revoked_at ||
-    new Date(storedToken.expires_at) <= new Date() ||
-    storedToken.user_id !== decoded.userId
-  ) {
-    return null;
-  }
+    if (!storedToken || storedToken.user_id !== decoded.userId) {
+      return null;
+    }
 
-  const user = await findUserById(decoded.userId);
+    // A revoked token is being reused.
+    if (storedToken.revoked_at) {
+      await revokeRefreshTokenFamily(storedToken.family_id, client);
+      return null;
+    }
 
-  if (!user) {
-    return null;
-  }
+    if (new Date(storedToken.expires_at) <= new Date()) {
+      return null;
+    }
 
-  const session = await withTransaction(async (client) => {
+    const user = await findUserById(decoded.userId, client);
+
+    if (!user) {
+      return null;
+    }
+
     const revokedToken = await revokeRefreshToken(tokenHash, client);
 
     if (!revokedToken) {
       return null;
     }
 
-    return await createSession(user, client);
+    return createSession(user, client, storedToken.family_id);
   });
-
-  return session;
 };
 
-export { createSession, rotateSession };
+const logoutSession = async (refreshToken, userId) => {
+  if (!refreshToken) {
+    return false;
+  }
+
+  let decoded;
+
+  try {
+    decoded = verifyRefreshToken(refreshToken);
+  } catch {
+    return false;
+  }
+
+  if (decoded.userId !== userId) {
+    return false;
+  }
+
+  const tokenHash = hashToken(refreshToken);
+
+  return withTransaction(async (client) => {
+    const revokedToken = await revokeRefreshToken(tokenHash, client);
+
+    return Boolean(revokedToken);
+  });
+};
+
+export { createSession, rotateSession, logoutSession };

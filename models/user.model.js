@@ -27,14 +27,14 @@ const findUserByEmail = async (email) => {
   return rows[0] || null;
 };
 
-const findUserById = async (id) => {
+const findUserById = async (id, client = pool) => {
   const query = `
     SELECT id, name, email, created_at, updated_at
     FROM users
     WHERE id = $1
   `;
 
-  const { rows } = await pool.query(query, [id]);
+  const { rows } = await client.query(query, [id]);
 
   return rows[0] || null;
 };
